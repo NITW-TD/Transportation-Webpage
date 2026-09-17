@@ -612,6 +612,21 @@
 
     box-shadow: 0 4px 12px rgba(13, 110, 253, 0.25);
   }
+  /* Seminar Title Alignment CSS */
+  .seminar-title-item { 
+    display: block; 
+    width: 100%; 
+    margin-bottom: 8px; 
+    padding: 0;
+   } 
+   
+  .seminar-title-item a {
+    display: block; 
+    width: 100%; 
+    margin: 0; 
+    padding: 0; 
+    text-align: left; 
+  }
 </style>
 <ul
   class="nav nav-pills-rounded nav-justified mb-3"
@@ -976,6 +991,27 @@
         .replace(/'/g, "&#039;");
     }
 
+    // Preserve line breaks and separate numbered Seminar Titles
+    // Example:
+    // 1. Advanced Driver Assistance Systems
+    // 2. Soil Stabilization By Other Materials
+    function formatSeminarTitle(value) {
+      let safe = escapeHtml(value);
+
+      // Convert actual Excel/Windows/Mac line breaks to <br>
+      safe = safe.replace(/\r\n|\r|\n/g, "<br>");
+
+      // Also handle cells where titles are stored on one line:
+      // "1. First Title 2. Second Title"
+      safe = safe.replace(/\s+(?=\d+\.\s)/g, "<br>");
+
+      return safe;
+    }
+
+    function formatMultilineText(value) {
+      return escapeHtml(value).replace(/\r\n|\r|\n/g, "<br>");
+    }
+
     function getFirstValue(row, keys) {
       for (const key of keys) {
         if (row[key]) return row[key];
@@ -984,6 +1020,7 @@
       return "";
     }
 
+    // ================= BUILD RESEARCH SCHOLAR DETAILS =================
     function buildRsDetails(row) {
       const hiddenFields = [
         "photo",
@@ -997,6 +1034,71 @@
         "roll number",
         "seminar abstract",
       ];
+
+      // Convert an Excel value into an array of numbered items.
+      // Example:
+      // "1. First title 2. Second title" -> ["1. First title", "2. Second title"]
+      function splitNumberedItems(value) {
+        const str = String(value || "")
+          .replace(/\r\n/g, "\n")
+          .replace(/\r/g, "\n")
+          .trim();
+
+        if (!str) return [];
+
+        const matches = [...str.matchAll(/(?:^|\n|\s)(\d+)\.\s+/g)];
+
+        // If there are no numbered items, keep the complete value as one item.
+        if (matches.length === 0) return [str];
+
+        const items = [];
+
+        matches.forEach((match, index) => {
+          const startIndex = match.index + match[0].length - match[0].length;
+          const contentStart = match.index + match[0].length - 0;
+
+          // The match may include a preceding space/newline. Find the actual number.
+          const numberStart = match.index + match[0].lastIndexOf(match[1] + ".");
+          const endIndex =
+            index + 1 < matches.length ? matches[index + 1].index : str.length;
+
+          const item = str.slice(numberStart, endIndex).trim();
+
+          if (item) items.push(item);
+        });
+
+        return items;
+      }
+
+      // Same idea as above, but keeps each numbered abstract together.
+      function splitNumberedAbstracts(value) {
+        const str = String(value || "")
+          .replace(/\r\n/g, "\n")
+          .replace(/\r/g, "\n")
+          .trim();
+
+        if (!str) return [];
+
+        const matches = [...str.matchAll(/(?:^|\n|\s)(\d+)\.\s+/g)];
+
+        if (matches.length === 0) return [str];
+
+        const abstracts = [];
+
+        matches.forEach((match, index) => {
+          const numberStart =
+            match.index + match[0].lastIndexOf(match[1] + ".");
+          const endIndex =
+            index + 1 < matches.length ? matches[index + 1].index : str.length;
+
+          const item = str.slice(numberStart, endIndex).trim();
+
+          if (item) abstracts.push(item);
+        });
+
+        return abstracts;
+      }
+
       const rows = Object.keys(row)
         .filter((key) => {
           const normalizedKey = key.toLowerCase().trim();
@@ -1010,54 +1112,73 @@
               ? "Data not available"
               : row[key];
 
-          // Make Thesis Title clickable
-          // Make Thesis Title or Seminar Title clickable
-          if (
-            key.toLowerCase().includes("thesis title") ||
-            key.toLowerCase().includes("seminar title")
-          ) {
-            let popupContent = "";
+          // ================= SEMINAR TITLE =================
+          if (key.toLowerCase().includes("seminar title")) {
+            const seminarAbstract =
+              row["Seminar Abstract"] ||
+              row["SEMINAR ABSTRACT"] ||
+              row["seminar abstract"] ||
+              row["Seminar Details"] ||
+              "";
 
-            // Thesis Title → show Thesis Abstract
-            if (key.toLowerCase().includes("thesis title")) {
-              popupContent =
-                row["Thesis Abstract"] ||
-                row["THESIS ABSTRACT"] ||
-                row["thesis abstract"] ||
-                row["Abstract"] ||
-                "";
-            }
+            const titles = splitNumberedItems(value);
+            const abstracts = splitNumberedAbstracts(seminarAbstract);
 
-            // Seminar Title → show Seminar Details
-            else if (key.toLowerCase().includes("seminar title")) {
-              popupContent =
-                row["Seminar Abstract"] ||
-                row["SEMINAR ABSTRACT"] ||
-                row["seminar abstract"] ||
-                row["Seminar Details"] ||
-                "";
-            }
+            // Create ONE clickable link for EACH seminar title.
+            const seminarLinks = titles
+              .map((seminarTitle, index) => {
+                // Match abstract 1 to title 1, abstract 2 to title 2, etc.
+                const abstractForTitle =
+                  abstracts[index] ||
+                  (titles.length === 1 ? seminarAbstract : "");
+
+                return `
+                 <div class="seminar-title-item">
+                     <a href="javascript:void(0)"
+                        class="thesis-link seminar-single-title text-primary text-decoration-none fw-bold"
+                        data-title="${escapeHtml(seminarTitle)}"
+                        data-abstract="${escapeHtml(abstractForTitle)}">
+                       ${formatMultilineText(seminarTitle)}
+                     </a>
+                  </div>
+                `;
+              })
+              .join("");
 
             return `
-        <dt class="col-sm-4">${escapeHtml(key)}</dt>
+              <dt class="col-sm-4">${escapeHtml(key)}</dt>
+              <dd class="col-sm-8 seminar-title-text">
+                ${seminarLinks || "Data not available"}
+              </dd>
+            `;
+          }
 
-        <dd class="col-sm-8">
-            <a href="javascript:void(0)"
-               class="thesis-link text-primary text-decoration-none fw-bold"
-               data-title="${escapeHtml(value)}"
-               data-abstract="${escapeHtml(popupContent)}">
-               
-               ${escapeHtml(value)}
-               
-            </a>
-        </dd>
-    `;
+          // ================= THESIS TITLE =================
+          if (key.toLowerCase().includes("thesis title")) {
+            const popupContent =
+              row["Thesis Abstract"] ||
+              row["THESIS ABSTRACT"] ||
+              row["thesis abstract"] ||
+              row["Abstract"] ||
+              "";
+
+            return `
+              <dt class="col-sm-4">${escapeHtml(key)}</dt>
+              <dd class="col-sm-8">
+                <a href="javascript:void(0)"
+                   class="thesis-link text-primary text-decoration-none fw-bold"
+                   data-title="${escapeHtml(value)}"
+                   data-abstract="${escapeHtml(popupContent)}">
+                  ${formatMultilineText(value)}
+                </a>
+              </dd>
+            `;
           }
 
           return `
-        <dt class="col-sm-4">${escapeHtml(key)}</dt>
-        <dd class="col-sm-8">${escapeHtml(value)}</dd>
-    `;
+            <dt class="col-sm-4">${escapeHtml(key)}</dt>
+            <dd class="col-sm-8">${escapeHtml(value)}</dd>
+          `;
         })
         .join("");
 
@@ -1352,9 +1473,11 @@
     $(document).on("click", ".thesis-link", function (e) {
       e.preventDefault();
 
-      const title = $(this).data("title");
-
-      const content = $(this).data("abstract") || "Abstract not available.";
+      // Read the exact title and matching abstract from THIS clicked link.
+      // Each Seminar Title has its own data-abstract value.
+      const title = $(this).attr("data-title") || "Seminar Title";
+      const content =
+        $(this).attr("data-abstract") || "Abstract not available.";
 
       showDetailsModal(title, content, true);
     });
